@@ -121,13 +121,20 @@ namespace videocore { namespace iOS {
                         if([d hasMediaType:AVMediaTypeVideo] && [d position] == position)
                         {
                             bThis->m_captureDevice = d;
-                            NSError* error;
-                            [d lockForConfiguration:&error];
-                            if(SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"7.0")) {
-                                [d setActiveVideoMinFrameDuration:CMTimeMake(1, fps)];
-                                [d setActiveVideoMaxFrameDuration:CMTimeMake(1, fps)];
+                            BOOL deviceDoesSupportFrameRate = NO;
+                            for(AVFrameRateRange* range in d.activeFormat.videoSupportedFrameRateRanges) {
+                                if(range.maxFrameRate >= 30) {
+                                    deviceDoesSupportFrameRate = YES;
+                                    break;
+                                }
                             }
-                            [d unlockForConfiguration];
+                            if(SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"7.0") && deviceDoesSupportFrameRate) {
+                                if([d lockForConfiguration:nil]) {
+                                    [d setActiveVideoMinFrameDuration:CMTimeMake(1, fps)];
+                                    [d setActiveVideoMaxFrameDuration:CMTimeMake(1, fps)];
+                                    [d unlockForConfiguration];
+                                }
+                            }
                         }
                     }
                     
