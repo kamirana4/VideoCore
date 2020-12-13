@@ -497,7 +497,7 @@ namespace videocore { namespace simpleApi {
         [bSelf setupGraph];
     });
 }
-
+/**
 - (void) stopRecordWithCompletionHandler:(void(^)(BOOL))complete {
     m_cameraSource->stopRecordWithCompletionHandler(^(BOOL result) {
         if (complete) {
@@ -570,6 +570,7 @@ namespace videocore { namespace simpleApi {
     }
     return self;
 }
+ */
 
 - (void) dealloc
 {
