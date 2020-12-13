@@ -91,8 +91,8 @@ namespace videocore { namespace iOS {
         AVAudioSession *session = [AVAudioSession sharedInstance];
 
         __block MicSource* bThis = this;
-
-        PermissionBlock permission = ^(BOOL granted) {
+        
+        [session requestRecordPermission:^(BOOL granted) {
             if(granted) {
 
                 [session setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionMixWithOthers error:nil];
@@ -148,14 +148,7 @@ namespace videocore { namespace iOS {
                     DLog("Failed to start microphone!");
                 }
             }
-        };
-        
-        if(SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"7.0")) {
-            [session requestRecordPermission:permission];
-        } else {
-            permission(true);
-        }
-
+        }];
     }
     MicSource::~MicSource() {
         if(m_audioUnit) {
