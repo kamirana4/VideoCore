@@ -498,6 +498,79 @@ namespace videocore { namespace simpleApi {
     });
 }
 
+- (void) stopRecordWithCompletionHandler:(void(^)(BOOL))complete {
+    m_cameraSource->stopRecordWithCompletionHandler(^(BOOL result) {
+        if (complete) {
+            complete(result);
+        }
+    });
+}
+
+
+- (void)takePhotoFromStream:(void (^)(CMSampleBufferRef))complete {
+    if (m_cameraSource) {
+        AVCaptureStillImageOutput *avStillImageOutput = m_cameraSource->getStillImageOutput();
+        AVCaptureConnection *videoConnection = nil;
+        for (AVCaptureConnection *connection in avStillImageOutput.connections) {
+            for (AVCaptureInputPort *port in [connection inputPorts]) {
+                if ([[port mediaType] isEqual:AVMediaTypeVideo]) {
+                    videoConnection = connection;
+                    break;
+                }
+            }
+            if (videoConnection) {
+                break;
+            }
+        }
+        
+        if ([videoConnection isVideoOrientationSupported]) {
+            [videoConnection setVideoOrientation:(AVCaptureVideoOrientation)[UIDevice currentDevice].orientation];
+        }
+        
+        [avStillImageOutput captureStillImageAsynchronouslyFromConnection:videoConnection completionHandler:^(CMSampleBufferRef imageDataSampleBuffer, NSError *error) {
+            if (imageDataSampleBuffer && complete) {
+                    complete(imageDataSampleBuffer);
+            }
+        }];
+    }
+}
+
+- (void) setPaused:(BOOL)isOnPause
+{
+    m_cameraSource->setPaused(isOnPause);
+}
+
+- (void) setRecordFinished
+{
+    m_cameraSource->setRecordFinished();
+}
+
+- (instancetype)initWithRecordToFile:(NSURL *)fileUrl
+                         deviceModel:(NSString *)deviceModel
+                       sessionPreset:(NSString *)sessionPreset
+               useFrontCameraAtStart:(BOOL)useFrontCameraAtStart
+                    videoOrientation:(AVCaptureVideoOrientation)videoOrientation
+                           videoSize:(CGSize)videoSize
+                           frameRate:(int)fps
+                             bitrate:(int)bps
+             useInterfaceOrientation:(BOOL)useInterfaceOrientation {
+    if (( self = [super init] ))
+    {
+        self.fileUrl = fileUrl;
+        self.sessionPreset = sessionPreset;
+        self.deviceModel = deviceModel;
+        self.useFrontCameraAtStart = useFrontCameraAtStart;
+        self.videoOrientation = videoOrientation;
+        [self initInternalWithVideoSize:videoSize
+                              frameRate:fps
+                                bitrate:bps
+                useInterfaceOrientation:useInterfaceOrientation
+                            cameraState:VCCameraStateBack
+                             aspectMode:VCAspectModeFit];
+    }
+    return self;
+}
+
 - (void) dealloc
 {
     [self endRtmpSession];

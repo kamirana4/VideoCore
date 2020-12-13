@@ -136,10 +136,29 @@ typedef NS_ENUM(NSInteger, VCFilter) {
 
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+- (instancetype) initWithRecordToFile:(NSURL *)fileUrl
+                        deviceModel:(NSString *)deviceModel
+                        sessionPreset:(NSString *)sessionPreset
+                useFrontCameraAtStart:(BOOL)useFrontCameraAtStart
+                     videoOrientation:(AVCaptureVideoOrientation)videoOrientation
+                            videoSize:(CGSize)videoSize
+                            frameRate:(int)fps
+                              bitrate:(int)bps
+              useInterfaceOrientation:(BOOL)useInterfaceOrientation;
+
 - (void) startRtmpSessionWithURL:(NSString*) rtmpUrl
                     andStreamKey:(NSString*) streamKey;
 
 - (void) endRtmpSession;
+
+- (void) setPaused:(BOOL)isOnPause;
+
+- (void) setRecordFinished;
+
+- (void) stopRecordWithCompletionHandler:(void(^)(BOOL))complete;
+
+- (void)takePhotoFromStream:(void(^)(CMSampleBufferRef))complete;
 
 - (void) getCameraPreviewLayer: (AVCaptureVideoPreviewLayer**) previewLayer;
 
