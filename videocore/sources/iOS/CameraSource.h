@@ -29,6 +29,7 @@
 #include <videocore/sources/ISource.hpp>
 #include <videocore/transforms/IOutput.hpp>
 #include <CoreVideo/CoreVideo.h>
+#import <AVFoundation/AVFoundation.h>
 #include <glm/glm.hpp>
 
 
@@ -69,6 +70,10 @@ namespace videocore { namespace iOS {
          */
         void setupCamera(int fps = 15, bool useFront = true, bool useInterfaceOrientation = false, NSString* sessionPreset = nil, void (^callbackBlock)(void) = nil);
 
+        AVCaptureStillImageOutput* getStillImageOutput();
+        void stopRecordWithCompletionHandler(void (^callbackBlock)(BOOL result));
+        void setPaused(BOOL isOnPause);
+        void setRecordFinished();
         
         /*!
          *  Toggle the camera between front and back-facing cameras.

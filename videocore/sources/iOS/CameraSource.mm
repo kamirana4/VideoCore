@@ -33,32 +33,159 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v)  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
+#define A_SAMPLE_RATE 44100
+#define V_FRAME_RATE 30
 
-@interface sbCallback: NSObject<AVCaptureVideoDataOutputSampleBufferDelegate>
-{
+@interface sbCallback: NSObject<AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate> {
     std::weak_ptr<videocore::iOS::CameraSource> m_source;
 }
+// VJToday
+@property (strong, nonatomic) AVAssetWriter *assetWriter;
+@property (strong, nonatomic) AVAssetWriterInput *assetVideoInput;
+@property (strong, nonatomic) AVAssetWriterInput *assetAudioInput;
+@property (strong, nonatomic) AVAssetWriterInputPixelBufferAdaptor *videoAdapter;
+@property (strong, nonatomic) UIImage *blankImage;
+@property (nonatomic) BOOL isRunning;
+@property (nonatomic) BOOL isPaused;
+@property (nonatomic) BOOL isRecording;
+@property (nonatomic) CVPixelBufferRef pausedBuffer;
+@property (nonatomic) CMTime lastVideoTime;
 - (void) setSource:(std::weak_ptr<videocore::iOS::CameraSource>) source;
 @end
 
-@implementation sbCallback
--(void) setSource:(std::weak_ptr<videocore::iOS::CameraSource>)source
-{
+@implementation sbCallback {
+    int frameCount;
+    //CMTime lastVideoTime;
+}
+- (id)init:(int)m_fps {
+    self = [super init];
+    if (self) {
+        frameCount = 0;
+        _lastVideoTime = kCMTimeZero;
+    }
+    return self;
+}
+- (void)dealloc {
+    _blankImage = nil;
+    CVPixelBufferUnlockBaseAddress(_pausedBuffer, 0);
+    CVPixelBufferRelease(_pausedBuffer);
+#ifdef DEBUG
+    NSLog(@"-==== <<< sdCallback deallocated!");
+#endif
+    [super dealloc];
+}
+-(void)setSource:(std::weak_ptr<videocore::iOS::CameraSource>)source {
     m_source = source;
 }
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
-       fromConnection:(AVCaptureConnection *)connection
-{
-    auto source = m_source.lock();
-    if(source) {
-        source->bufferCaptured(CMSampleBufferGetImageBuffer(sampleBuffer));
+       fromConnection:(AVCaptureConnection *)connection {
+    if (_isRunning) {
+        if (_isPaused) {
+            if (!_blankImage) _blankImage = [self imageWithColor:[UIColor blackColor]];
+            if (!_pausedBuffer) _pausedBuffer = [self pixelBufferFromCGImage:_blankImage];
+            auto source = m_source.lock();
+            if (source) source->bufferCaptured(_pausedBuffer);
+        } else {
+            if ([captureOutput isKindOfClass:[AVCaptureVideoDataOutput class]]) {
+                // Sent frame to RTMP
+                CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+                auto source = m_source.lock();
+                if (source) source->bufferCaptured(buffer);
+                if (_isRecording && _assetWriter) {
+                    CVPixelBufferRetain(buffer);
+                    CFRetain(sampleBuffer);
+                    // Write frame to local file
+                    if (_assetWriter.status == AVAssetWriterStatusWriting && _videoAdapter.assetWriterInput.readyForMoreMediaData) {
+                        CMTime frameTime = CMTimeMake(frameCount, V_FRAME_RATE);
+                        if (_isRecording) {
+                            if (![_videoAdapter appendPixelBuffer:buffer withPresentationTime:frameTime]) {
+#ifdef DEBUG
+                                NSLog(@"-==== <<< ERROR DURING VIDEO PROCESSING FRAME #%d: %@", frameCount, _assetWriter.error.localizedDescription);
+#endif
+                            } else {
+                                frameCount++;
+                                _lastVideoTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+                            }
+                        }
+                    }
+                }
+                CVPixelBufferUnlockBaseAddress(buffer, 0);
+                CVPixelBufferRelease(buffer);
+                CFRelease(sampleBuffer);
+            } else if ([captureOutput isKindOfClass:[AVCaptureAudioDataOutput class]] && _isRecording && _assetWriter && _assetWriter.status == AVAssetWriterStatusWriting && _assetAudioInput.readyForMoreMediaData) {
+                CMSampleBufferRef aSampleBuff = [self adjustTime:sampleBuffer by:_lastVideoTime];
+                CFRetain(sampleBuffer);
+                if (![_assetAudioInput appendSampleBuffer:aSampleBuff]) {
+#ifdef DEBUG
+                    NSLog(@"-==== <<< ERROR DURING AUDIO PROCESSING : %@", _assetWriter.error.localizedDescription);
+#endif
+                }
+                CFRelease(aSampleBuff);
+                CFRelease(sampleBuffer);
+            }
+        }
     }
 }
-- (void) captureOutput:(AVCaptureOutput *)captureOutput
-   didDropSampleBuffer:(CMSampleBufferRef)sampleBuffer
-        fromConnection:(AVCaptureConnection *)connection
-{
+
+- (UIImage *)imageWithColor:(UIColor *)color {
+#ifdef DEBUG
+    NSLog(@"-==== <<< CREATING PAUSE IMAGE !!!");
+#endif
+    CGRect rect = CGRectMake(0, 0, 16, 9);
+    UIGraphicsBeginImageContext(rect.size);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextSetFillColorWithColor(context, [color CGColor]);
+    CGContextFillRect(context, rect);
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+- (CVPixelBufferRef)pixelBufferFromCGImage:(UIImage *)blankImage {
+    CGImage *image = [blankImage CGImage];
+    CGSize imageSize = CGSizeMake(16, 9);
+    NSDictionary *options = @{(id)kCVPixelBufferCGImageCompatibilityKey: @YES,
+                              (id)kCVPixelBufferCGBitmapContextCompatibilityKey: @YES};
+    CVPixelBufferRef pxbuffer = NULL;
+    CVReturn status = CVPixelBufferCreate(kCFAllocatorDefault, imageSize.width,
+                                          imageSize.height, kCVPixelFormatType_32BGRA, (__bridge CFDictionaryRef) options,
+                                          &pxbuffer);
+    NSParameterAssert(status == kCVReturnSuccess && pxbuffer != NULL);
+    
+    CVPixelBufferLockBaseAddress(pxbuffer, 0);
+    void *pxdata = CVPixelBufferGetBaseAddress(pxbuffer);
+    NSParameterAssert(pxdata != NULL);
+    
+    CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(pxdata, imageSize.width,
+                                                 imageSize.height, 8, 4 * imageSize.width, rgbColorSpace,
+                                                 kCGImageAlphaNoneSkipFirst);
+    NSParameterAssert(context);
+    
+    CGContextDrawImage(context, CGRectMake(0 + (imageSize.width-CGImageGetWidth(image))/2,
+                                           (imageSize.height-CGImageGetHeight(image))/2,
+                                           CGImageGetWidth(image),
+                                           CGImageGetHeight(image)), image);
+    CGColorSpaceRelease(rgbColorSpace);
+    CGContextRelease(context);
+    
+    CVPixelBufferUnlockBaseAddress(pxbuffer, 0);
+    
+    return pxbuffer;
+}
+- (CMSampleBufferRef)adjustTime:(CMSampleBufferRef)sample by:(CMTime)offset {
+    CMItemCount count;
+    CMSampleBufferGetSampleTimingInfoArray(sample, 0, nil, &count);
+    CMSampleTimingInfo *pInfo = new CMSampleTimingInfo;
+    CMSampleBufferGetSampleTimingInfoArray(sample, count, pInfo, &count);
+    for (CMItemCount i = 0; i < count; i++) {
+        pInfo[i].decodeTimeStamp = kCMTimeInvalid;
+        pInfo[i].presentationTimeStamp = CMTimeSubtract(pInfo[i].presentationTimeStamp, offset);;
+    }
+    CMSampleBufferRef sout;
+    CMSampleBufferCreateCopyWithNewTiming(nil, sample, count, pInfo, &sout);
+    free(pInfo);
+    return sout;
 }
 - (void) orientationChanged: (NSNotification*) notification
 {
@@ -72,7 +199,14 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 @end
 namespace videocore { namespace iOS {
     
-
+    AVAssetWriter *assetWriter;
+    AVAssetWriterInput *assetVideoInput;
+    AVAssetWriterInput *assetAudioInput;
+    AVAssetWriterInputPixelBufferAdaptor *videoAdapter;
+    AVCaptureStillImageOutput *avStillImageOutput;
+    AVCaptureDeviceInput *audioInput;
+    AVCaptureDeviceInput* input;
+    AVCaptureVideoDataOutput* vOutput;
     
     CameraSource::CameraSource()
     :
@@ -102,6 +236,70 @@ namespace videocore { namespace iOS {
         }
     }
     
+AVCaptureStillImageOutput*
+CameraSource::getStillImageOutput() {
+    return avStillImageOutput;
+}
+void
+CameraSource::setPaused(BOOL isOnPause) {
+#ifdef DEBUG
+    NSLog(@"-==== <<< SET STREAM PAUSE TO - %@", isOnPause ? @"YES" : @"NO");
+#endif
+    ((sbCallback*)m_callbackSession).isPaused = isOnPause;
+}
+void
+CameraSource::setRecordFinished() {
+    ((sbCallback*)m_callbackSession).isRecording = NO;
+    if (assetWriter) {
+        [assetWriter finishWritingWithCompletionHandler:^{
+            DLog("\n<<< # Kill assetWriter");
+            if (assetWriter) [assetWriter release];
+            DLog("\n<<< # Kill assetVideoInput");
+            if (assetVideoInput) [assetVideoInput release];
+            DLog("\n<<< # Kill assetAudioInput");
+            if (assetAudioInput) [assetAudioInput release];
+            DLog("\n<<< # Kill videoAdapter");
+            if (videoAdapter) [videoAdapter release];
+        }];
+    }
+}
+void
+CameraSource::stopRecordWithCompletionHandler(void (^callbackBlock)(BOOL result))
+{
+    ((sbCallback*)m_callbackSession).isRunning = NO;
+    if (m_previewLayer) {
+        [(id)m_previewLayer release];
+        m_previewLayer = nullptr;
+    }
+    if (assetWriter) {
+        [assetWriter endSessionAtSourceTime:((sbCallback*)m_callbackSession).lastVideoTime];
+        [assetWriter finishWritingWithCompletionHandler:^{
+            NSLog(@"\n<<< # Kill assetWriter");
+            if (assetWriter) [assetWriter release];
+            NSLog(@"\n<<< # Kill assetVideoInput");
+            if (assetVideoInput) [assetVideoInput release];
+            NSLog(@"\n<<< # Kill assetAudioInput");
+            if (assetAudioInput) [assetAudioInput release];
+            NSLog(@"\n<<< # Kill videoAdapter");
+            if (videoAdapter) [videoAdapter release];
+            if (m_callbackSession) {
+                NSLog(@"\n<<< # Releasing m_callbackSession");
+                [[NSNotificationCenter defaultCenter] removeObserver:(id)m_callbackSession];
+                [((sbCallback*)m_callbackSession) release];
+                m_callbackSession = nullptr;
+            }
+            if (callbackBlock) {
+                NSLog(@"\n<<< # Killing OK )))");
+                callbackBlock(YES);
+            }
+        }];
+    } else {
+        if (callbackBlock) {
+            callbackBlock(YES);
+        }
+    }
+}
+
     void
     CameraSource::setupCamera(int fps, bool useFront, bool useInterfaceOrientation, NSString* sessionPreset, void (^callbackBlock)(void))
     {

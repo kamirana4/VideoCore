@@ -88,6 +88,11 @@ typedef NS_ENUM(NSInteger, VCFilter) {
 @property (nonatomic, assign) CGSize            videoSize;      // Change will not take place until the next RTMP Session
 @property (nonatomic, assign) int               bitrate;        // Change will not take place until the next RTMP Session
 @property (nonatomic, assign) int               fps;            // Change will not take place until the next RTMP Session
+@property (nonatomic, strong) NSURL             *fileUrl;       // File URL for stream record
+@property (nonatomic, strong) NSString          *sessionPreset; // AVCaptureSession preset
+@property (nonatomic, strong) NSString          *deviceModel; //
+@property (nonatomic)         BOOL              useFrontCameraAtStart; // Using front camera at stream start
+@property (nonatomic)         AVCaptureVideoOrientation videoOrientation;
 @property (nonatomic, assign, readonly) BOOL    useInterfaceOrientation;
 @property (nonatomic, assign) VCCameraState cameraState;
 @property (nonatomic, assign) BOOL          orientationLocked;
@@ -139,26 +144,25 @@ typedef NS_ENUM(NSInteger, VCFilter) {
 - (void) startRtmpSessionWithURL:(NSString*) rtmpUrl
                     andStreamKey:(NSString*) streamKey;
 
+- (instancetype) initWithRecordToFile:(NSURL *)fileUrl
+                        deviceModel:(NSString *)deviceModel
+                        sessionPreset:(NSString *)sessionPreset
+                useFrontCameraAtStart:(BOOL)useFrontCameraAtStart
+                     videoOrientation:(AVCaptureVideoOrientation)videoOrientation
+                            videoSize:(CGSize)videoSize
+                            frameRate:(int)fps
+                              bitrate:(int)bps
+              useInterfaceOrientation:(BOOL)useInterfaceOrientation;
+
+- (void) setPaused:(BOOL)isOnPause;
+
+- (void) setRecordFinished;
+
+- (void) stopRecordWithCompletionHandler:(void(^)(BOOL))complete;
+
 - (void) endRtmpSession;
 
-// -----------------------------------------------------------------------------
-//- (instancetype) initWithRecordToFile:(NSURL *)fileUrl
-//                        deviceModel:(NSString *)deviceModel
-//                        sessionPreset:(NSString *)sessionPreset
-//                useFrontCameraAtStart:(BOOL)useFrontCameraAtStart
-//                     videoOrientation:(AVCaptureVideoOrientation)videoOrientation
-//                            videoSize:(CGSize)videoSize
-//                            frameRate:(int)fps
-//                              bitrate:(int)bps
-//              useInterfaceOrientation:(BOOL)useInterfaceOrientation;
-
-//- (void) setPaused:(BOOL)isOnPause;
-//
-//- (void) setRecordFinished;
-//
-//- (void) stopRecordWithCompletionHandler:(void(^)(BOOL))complete;
-//
-//- (void)takePhotoFromStream:(void(^)(CMSampleBufferRef))complete;
+- (void)takePhotoFromStream:(void(^)(CMSampleBufferRef))complete;
 
 - (void) getCameraPreviewLayer: (AVCaptureVideoPreviewLayer**) previewLayer;
 
